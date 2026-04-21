@@ -115,6 +115,7 @@ def run_day(day_candles: pd.DataFrame, pair: str) -> dict | None:
     # ------------------------------------------------------------------
     sweep_detected   = False
     sweep_direction  = None   # "high" or "low"
+    sweep_idx        = None   # candle index of the sweep candle
 
     # After sweep: track most-recent swing high/low for BOS
     # We update these as new candles form post-sweep
@@ -122,6 +123,7 @@ def run_day(day_candles: pd.DataFrame, pair: str) -> dict | None:
     recent_low  = None
 
     bos_detected     = False
+    bos_idx          = None   # candle index of the BOS candle
     trade_direction  = None   # "short" or "long"
 
     # Active FVGs: list of dicts {direction, fvg_high, fvg_low, size, confirmed, invalidated}
@@ -181,6 +183,7 @@ def run_day(day_candles: pd.DataFrame, pair: str) -> dict | None:
                 # Seed most-recent high/low from the sweep candle itself
                 recent_high = h
                 recent_low  = l
+                sweep_idx       = i
                 trade_direction = "short" if sweep_direction == "high" else "long"
             continue   # Move to next candle after marking sweep
 
@@ -242,6 +245,7 @@ def run_day(day_candles: pd.DataFrame, pair: str) -> dict | None:
 
             if bos_bear or bos_bull:
                 bos_detected = True
+                bos_idx      = i
                 recent_high  = h
                 recent_low   = l
             continue
@@ -414,6 +418,9 @@ def run_day(day_candles: pd.DataFrame, pair: str) -> dict | None:
             "risk_dist":        round(risk_dist, 5),
             "sweep_direction":  sweep_direction,
             "entry_time":       str(dt),
+            "entry_idx":        i,
+            "sweep_idx":        sweep_idx,
+            "bos_idx":          bos_idx,
             "outcome":          result,
         }
 
@@ -448,12 +455,14 @@ def _simulate_trade(
     tp1_hit      = False
     tp1_profit   = 0.0
     active_stop  = stop
+    tp1_time     = None
 
     for j in range(entry_idx + 1, len(candles)):
         c  = candles.iloc[j]
 
-        lo = c["low"]
-        hi = c["high"]
+        lo  = c["low"]
+        hi  = c["high"]
+        cdt = c["datetime"]
 
         if is_long:
             # Stop hit
@@ -461,20 +470,25 @@ def _simulate_trade(
                 half2_profit = active_stop - entry   # 0 at BE, negative at original stop
                 return {
                     "profit_raw": tp1_profit + half2_profit,
-                    "label": "PW" if tp1_hit else "L",
+                    "label":      "PW" if tp1_hit else "L",
+                    "tp1_time":   tp1_time,
+                    "exit_time":  cdt,
                 }
             # TP1
             if tp1 is not None and not tp1_hit and hi >= tp1:
                 tp1_profit  = tp1 - entry
                 tp1_hit     = True
+                tp1_time    = cdt
                 active_stop = entry   # move SL to breakeven
             # Full TP
             if tp1_hit and hi >= full_tp:
                 half2_profit = full_tp - entry
-                return {"profit_raw": tp1_profit + half2_profit, "label": "W"}
+                return {"profit_raw": tp1_profit + half2_profit, "label": "W",
+                        "tp1_time": tp1_time, "exit_time": cdt}
             # If TP1 was skipped, look straight for full TP
             if tp1 is None and hi >= full_tp:
-                return {"profit_raw": full_tp - entry, "label": "W"}
+                return {"profit_raw": full_tp - entry, "label": "W",
+                        "tp1_time": None, "exit_time": cdt}
 
         else:  # SHORT
             # Stop hit
@@ -482,23 +496,29 @@ def _simulate_trade(
                 half2_profit = entry - active_stop
                 return {
                     "profit_raw": tp1_profit + half2_profit,
-                    "label": "PW" if tp1_hit else "L",
+                    "label":      "PW" if tp1_hit else "L",
+                    "tp1_time":   tp1_time,
+                    "exit_time":  cdt,
                 }
             # TP1
             if tp1 is not None and not tp1_hit and lo <= tp1:
                 tp1_profit  = entry - tp1
                 tp1_hit     = True
+                tp1_time    = cdt
                 active_stop = entry
             # Full TP
             if tp1_hit and lo <= full_tp:
                 half2_profit = entry - full_tp
-                return {"profit_raw": tp1_profit + half2_profit, "label": "W"}
+                return {"profit_raw": tp1_profit + half2_profit, "label": "W",
+                        "tp1_time": tp1_time, "exit_time": cdt}
             # If TP1 was skipped, look straight for full TP
             if tp1 is None and lo <= full_tp:
-                return {"profit_raw": entry - full_tp, "label": "W"}
+                return {"profit_raw": entry - full_tp, "label": "W",
+                        "tp1_time": None, "exit_time": cdt}
 
     # Ran out of candle data — if TP1 was hit, half 2 is still at breakeven
     if tp1_hit:
-        return {"profit_raw": tp1_profit, "label": "PW"}
+        return {"profit_raw": tp1_profit, "label": "PW",
+                "tp1_time": tp1_time, "exit_time": None}
 
-    return {"profit_raw": 0.0, "label": "L"}
+    return {"profit_raw": 0.0, "label": "L", "tp1_time": None, "exit_time": None}

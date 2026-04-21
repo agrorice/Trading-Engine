@@ -1,0 +1,819 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Trade Chart</title>
+<script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: #131722;
+    color: #d1d4dc;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-size: 13px;
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  /* ── Top toolbar ────────────────────────────────────────── */
+  #toolbar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 16px;
+    background: #1e222d;
+    border-bottom: 1px solid #2a2e39;
+    flex-shrink: 0;
+  }
+  #toolbar label { color: #787b86; font-size: 12px; }
+  #toolbar input[type=date] {
+    background: #2a2e39;
+    border: 1px solid #363a45;
+    color: #d1d4dc;
+    padding: 5px 8px;
+    border-radius: 4px;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  #toolbar input[type=date]:focus { outline: none; border-color: #2962ff; }
+  #btn-load {
+    background: #2962ff;
+    color: #fff;
+    border: none;
+    padding: 6px 18px;
+    border-radius: 4px;
+    font-size: 13px;
+    cursor: pointer;
+    font-weight: 600;
+    transition: background 0.15s;
+  }
+  #btn-load:hover { background: #1e53e5; }
+  #btn-load:disabled { background: #363a45; color: #787b86; cursor: default; }
+  #status { color: #787b86; font-size: 12px; margin-left: 8px; }
+
+  /* ── Main layout ────────────────────────────────────────── */
+  #main {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+  }
+
+  /* ── Sidebar ─────────────────────────────────────────────── */
+  #sidebar {
+    width: 200px;
+    flex-shrink: 0;
+    background: #1e222d;
+    border-right: 1px solid #2a2e39;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  #sidebar-header {
+    padding: 10px 12px;
+    border-bottom: 1px solid #2a2e39;
+    color: #787b86;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-shrink: 0;
+  }
+  #sidebar-stats { font-size: 11px; color: #787b86; }
+  #day-list {
+    overflow-y: auto;
+    flex: 1;
+  }
+  #day-list::-webkit-scrollbar { width: 6px; }
+  #day-list::-webkit-scrollbar-track { background: transparent; }
+  #day-list::-webkit-scrollbar-thumb { background: #363a45; border-radius: 3px; }
+
+  .day-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    cursor: pointer;
+    border-bottom: 1px solid #2a2e39;
+    transition: background 0.1s;
+    user-select: none;
+  }
+  .day-item:hover { background: #2a2e39; }
+  .day-item.active { background: #2a2e39; border-left: 2px solid #2962ff; }
+  .day-item .day-date { flex: 1; color: #d1d4dc; font-size: 12px; }
+  .day-item .day-pair { color: #787b86; font-size: 11px; }
+  .day-item .day-badge {
+    font-size: 11px;
+    font-weight: 700;
+    padding: 2px 6px;
+    border-radius: 3px;
+    min-width: 28px;
+    text-align: center;
+  }
+  .badge-W  { background: rgba(38,166,154,0.25); color: #26a69a; }
+  .badge-PW { background: rgba(255,167,38,0.25);  color: #ffa726; }
+  .badge-L  { background: rgba(239,83,80,0.25);   color: #ef5350; }
+  .badge-no { background: rgba(120,123,134,0.15); color: #787b86; }
+
+  /* ── Chart area ──────────────────────────────────────────── */
+  #chart-area {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  #chart-header {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 8px 16px;
+    background: #1e222d;
+    border-bottom: 1px solid #2a2e39;
+    flex-shrink: 0;
+    min-height: 38px;
+  }
+  #chart-title { font-size: 14px; font-weight: 600; color: #d1d4dc; }
+  .info-chip {
+    font-size: 12px;
+    padding: 2px 8px;
+    border-radius: 3px;
+    background: #2a2e39;
+    color: #d1d4dc;
+  }
+  .chip-W  { background: rgba(38,166,154,0.2); color: #26a69a; }
+  .chip-PW { background: rgba(255,167,38,0.2);  color: #ffa726; }
+  .chip-L  { background: rgba(239,83,80,0.2);   color: #ef5350; }
+
+  #chart-wrap {
+    flex: 1;
+    position: relative;
+    overflow: hidden;
+  }
+  #chart { width: 100%; height: 100%; }
+  #overlay-canvas {
+    position: absolute;
+    top: 0; left: 0;
+    pointer-events: none;
+    z-index: 2;
+  }
+
+  /* ── Legend panel (bottom-right of chart) ─────────────────── */
+  #legend {
+    position: absolute;
+    top: 12px;
+    right: 72px;
+    background: rgba(30,34,45,0.92);
+    border: 1px solid #2a2e39;
+    border-radius: 6px;
+    padding: 10px 14px;
+    font-size: 12px;
+    z-index: 10;
+    min-width: 180px;
+    display: none;
+  }
+  #legend .leg-title {
+    font-weight: 700;
+    margin-bottom: 8px;
+    font-size: 13px;
+  }
+  #legend .leg-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 4px;
+  }
+  #legend .leg-label { color: #787b86; }
+  #legend .leg-val   { font-weight: 600; }
+  #legend .leg-sep   { border-top: 1px solid #2a2e39; margin: 6px 0; }
+
+  /* Key colours */
+  .col-psh  { color: #ff9900; }
+  .col-psl  { color: #2196f3; }
+  .col-mid  { color: #888; }
+  .col-entry{ color: #d1d4dc; }
+  .col-sl   { color: #ef5350; }
+  .col-tp1  { color: #ffd600; }
+  .col-tp2  { color: #26a69a; }
+  .col-W    { color: #26a69a; }
+  .col-PW   { color: #ffa726; }
+  .col-L    { color: #ef5350; }
+
+  #empty-state {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    color: #787b86;
+    font-size: 15px;
+    flex-direction: column;
+    gap: 12px;
+  }
+  #empty-state .hint { font-size: 12px; color: #4a4e5a; }
+
+  /* Nav buttons */
+  #nav-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-left: auto;
+  }
+  .nav-btn {
+    background: #2a2e39;
+    border: 1px solid #363a45;
+    color: #d1d4dc;
+    padding: 4px 10px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 13px;
+    transition: background 0.1s;
+  }
+  .nav-btn:hover { background: #363a45; }
+  .nav-btn:disabled { opacity: 0.35; cursor: default; }
+  #nav-pos { color: #787b86; font-size: 12px; min-width: 60px; text-align: center; }
+</style>
+</head>
+<body>
+
+<!-- ── Toolbar ──────────────────────────────────────────────────── -->
+<div id="toolbar">
+  <label>From</label>
+  <input type="date" id="inp-start" value="2025-02-01">
+  <label>To</label>
+  <input type="date" id="inp-end"   value="2025-02-28">
+  <button id="btn-load" onclick="loadBacktest()">Load Backtest</button>
+  <span id="status"></span>
+</div>
+
+<!-- ── Main ─────────────────────────────────────────────────────── -->
+<div id="main">
+
+  <!-- Sidebar -->
+  <div id="sidebar">
+    <div id="sidebar-header">
+      <span>Trading Days</span>
+      <span id="sidebar-stats"></span>
+    </div>
+    <div id="day-list">
+      <div style="padding:24px 12px; color:#4a4e5a; font-size:12px; text-align:center;">
+        Load a backtest to see results.
+      </div>
+    </div>
+  </div>
+
+  <!-- Chart area -->
+  <div id="chart-area">
+    <div id="chart-header">
+      <span id="chart-title" style="color:#4a4e5a;">No day selected</span>
+      <span id="chart-chips"></span>
+      <div id="nav-bar">
+        <button class="nav-btn" id="btn-prev" onclick="navigate(-1)" disabled>◀</button>
+        <span id="nav-pos"></span>
+        <button class="nav-btn" id="btn-next" onclick="navigate(1)"  disabled>▶</button>
+      </div>
+    </div>
+    <div id="chart-wrap">
+      <div id="chart"></div>
+      <canvas id="overlay-canvas"></canvas>
+      <div id="legend"></div>
+      <div id="empty-state">
+        <span>Select a date range and click Load Backtest</span>
+        <span class="hint">Then click any day in the sidebar to view its chart</span>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+// ─────────────────────────────────────────────────────────────────────────────
+// State
+// ─────────────────────────────────────────────────────────────────────────────
+let allDays       = [];   // [{date, pair, candles, trade}]
+let currentIdx    = -1;
+let chart         = null;
+let mainSeries    = null;
+let overlayCanvas = document.getElementById("overlay-canvas");
+let overlayCtx    = overlayCanvas.getContext("2d");
+let resizeObs     = null;
+
+const API = "http://localhost:5001/api/backtest";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Timezone helper
+// Lightweight Charts displays timestamps in UTC. Our data is in ET (America/New_York).
+// This function converts a UTC Unix timestamp to a "fake UTC" Unix timestamp whose
+// numeric value equals the ET wall-clock time, so the chart axis labels show ET times.
+// e.g. 9:30 AM ET (14:30 UTC in EST) → returned as if it were 09:30 UTC.
+// ─────────────────────────────────────────────────────────────────────────────
+function toETTime(utcUnix) {
+  if (utcUnix === null || utcUnix === undefined) return null;
+  const d = new Date(utcUnix * 1000);
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", second: "2-digit",
+    hour12: false,
+  }).formatToParts(d);
+  const get = (t) => parseInt(parts.find(p => p.type === t).value);
+  return Math.floor(Date.UTC(
+    get("year"), get("month") - 1, get("day"),
+    get("hour"), get("minute"), get("second")
+  ) / 1000);
+}
+
+function etifyDay(day) {
+  return {
+    ...day,
+    candles: day.candles.map(c => ({ ...c, time: toETTime(c.time) })),
+    trade: day.trade ? {
+      ...day.trade,
+      entry_time: toETTime(day.trade.entry_time),
+      sweep_time: toETTime(day.trade.sweep_time),
+      bos_time:   toETTime(day.trade.bos_time),
+      tp1_time:   toETTime(day.trade.tp1_time),
+      exit_time:  toETTime(day.trade.exit_time),
+    } : null,
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Load backtest from server
+// ─────────────────────────────────────────────────────────────────────────────
+async function loadBacktest() {
+  const start = document.getElementById("inp-start").value;
+  const end   = document.getElementById("inp-end").value;
+  if (!start || !end) { setStatus("Select start and end dates."); return; }
+
+  const btn = document.getElementById("btn-load");
+  btn.disabled = true;
+  setStatus("Fetching data — this may take 20-30 s (API rate limits)…");
+
+  try {
+    const resp = await fetch(`${API}?start=${start}&end=${end}`);
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      setStatus("Error: " + (err.error || resp.statusText));
+      return;
+    }
+    const data = await resp.json();
+    // Convert all timestamps to ET wall-clock time for correct chart display
+    allDays = (data.days || []).map(etifyDay);
+    renderSidebar();
+    if (allDays.length > 0) {
+      // Auto-select first day with a trade, or first day if none
+      const firstTrade = allDays.findIndex(d => d.trade !== null);
+      showDay(firstTrade >= 0 ? firstTrade : 0);
+    }
+    setStatus(`Loaded ${allDays.length} days.`);
+  } catch (e) {
+    setStatus("Could not connect to chart_server.py — is it running?");
+    console.error(e);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function setStatus(msg) {
+  document.getElementById("status").textContent = msg;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Sidebar
+// ─────────────────────────────────────────────────────────────────────────────
+function renderSidebar() {
+  const list = document.getElementById("day-list");
+  list.innerHTML = "";
+
+  const total  = allDays.length;
+  const traded = allDays.filter(d => d.trade).length;
+  const wins   = allDays.filter(d => d.trade?.wl === "W").length;
+  const pws    = allDays.filter(d => d.trade?.wl === "PW").length;
+  const losses = allDays.filter(d => d.trade?.wl === "L").length;
+  const wr     = traded ? Math.round(((wins + pws) / traded) * 100) : 0;
+
+  document.getElementById("sidebar-stats").textContent =
+    `${wins}W / ${pws}PW / ${losses}L`;
+
+  allDays.forEach((day, idx) => {
+    const wl    = day.trade?.wl;
+    const badge = wl ? `<span class="day-badge badge-${wl}">${wl}</span>`
+                     : `<span class="day-badge badge-no">—</span>`;
+    const item = document.createElement("div");
+    item.className = "day-item";
+    item.dataset.idx = idx;
+    item.innerHTML = `
+      <div class="day-date">${day.date}</div>
+      <div class="day-pair">${day.pair}</div>
+      ${badge}
+    `;
+    item.addEventListener("click", () => showDay(idx));
+    list.appendChild(item);
+  });
+}
+
+function setActiveItem(idx) {
+  document.querySelectorAll(".day-item").forEach(el => el.classList.remove("active"));
+  const el = document.querySelector(`.day-item[data-idx="${idx}"]`);
+  if (el) {
+    el.classList.add("active");
+    el.scrollIntoView({ block: "nearest" });
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Chart rendering
+// ─────────────────────────────────────────────────────────────────────────────
+function showDay(idx) {
+  if (idx < 0 || idx >= allDays.length) return;
+  currentIdx = idx;
+  setActiveItem(idx);
+  updateNavButtons();
+
+  const day = allDays[idx];
+  document.getElementById("empty-state").style.display = "none";
+  document.getElementById("chart-title").textContent =
+    `${day.date}  ·  ${day.pair}`;
+
+  renderChips(day);
+  renderChart(day);
+  renderLegend(day);
+}
+
+function renderChips(day) {
+  const container = document.getElementById("chart-chips");
+  container.innerHTML = "";
+  if (!day.trade) {
+    addChip(container, "No Trade", "");
+    return;
+  }
+  const t = day.trade;
+  addChip(container, t.direction, "");
+  addChip(container, t.sweep + " Sweep", "");
+  addChip(container, t.wl, `chip-${t.wl}`);
+  addChip(container, t.rr + " R:R", "");
+  addChip(container, `${t.r_result > 0 ? "+" : ""}${t.r_result}R`, "");
+  addChip(container, `$${t.profit_dollars >= 0 ? "+" : ""}${t.profit_dollars.toFixed(0)}`, "");
+}
+
+function addChip(container, text, extraClass) {
+  const span = document.createElement("span");
+  span.className = "info-chip " + extraClass;
+  span.textContent = text;
+  container.appendChild(span);
+}
+
+function renderChart(day) {
+  // Destroy previous chart
+  if (chart) { chart.remove(); chart = null; mainSeries = null; }
+  if (resizeObs) { resizeObs.disconnect(); resizeObs = null; }
+
+  const wrap = document.getElementById("chart-wrap");
+  const chartEl = document.getElementById("chart");
+  chartEl.innerHTML = "";
+
+  // Size overlay canvas to match
+  overlayCanvas.width  = wrap.clientWidth;
+  overlayCanvas.height = wrap.clientHeight;
+  overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+
+  chart = LightweightCharts.createChart(chartEl, {
+    width:  wrap.clientWidth,
+    height: wrap.clientHeight,
+    layout: {
+      background: { color: "#131722" },
+      textColor:  "#d1d4dc",
+    },
+    grid: {
+      vertLines: { color: "#1e222d" },
+      horzLines: { color: "#1e222d" },
+    },
+    crosshair: {
+      mode: LightweightCharts.CrosshairMode.Normal,
+    },
+    rightPriceScale: {
+      borderColor:  "#2a2e39",
+      scaleMargins: { top: 0.08, bottom: 0.08 },
+    },
+    timeScale: {
+      borderColor:     "#2a2e39",
+      timeVisible:     true,
+      secondsVisible:  false,
+    },
+  });
+
+  mainSeries = chart.addCandlestickSeries({
+    upColor:          "#26a69a",
+    downColor:        "#ef5350",
+    borderUpColor:    "#26a69a",
+    borderDownColor:  "#ef5350",
+    wickUpColor:      "#26a69a",
+    wickDownColor:    "#ef5350",
+  });
+
+  mainSeries.setData(day.candles);
+
+  // Price lines + markers
+  if (day.trade) {
+    addPriceLines(day.trade);
+    addMarkers(day);
+  }
+
+  // Fit view to 3am–end-of-day data, leave a bit of right margin
+  chart.timeScale().fitContent();
+
+  // Draw colored zones on the overlay canvas
+  // Give chart a tick to lay out before drawing
+  setTimeout(() => drawOverlay(day), 60);
+
+  // Redraw overlay on any zoom/scroll
+  const redraw = () => setTimeout(() => drawOverlay(day), 10);
+  chart.timeScale().subscribeVisibleTimeRangeChange(redraw);
+  chart.timeScale().subscribeVisibleLogicalRangeChange(redraw);
+
+  // Resize chart when the container resizes
+  resizeObs = new ResizeObserver(() => {
+    chart.applyOptions({ width: wrap.clientWidth, height: wrap.clientHeight });
+    overlayCanvas.width  = wrap.clientWidth;
+    overlayCanvas.height = wrap.clientHeight;
+    redraw();
+  });
+  resizeObs.observe(wrap);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Price lines
+// ─────────────────────────────────────────────────────────────────────────────
+const LINE_STYLE = LightweightCharts.LineStyle;
+
+function addPriceLines(t) {
+  const lines = [
+    { price: t.psh,      color: "#ff9900", label: "PSH",   style: LINE_STYLE.Dashed,     width: 1 },
+    { price: t.psl,      color: "#2196f3", label: "PSL",   style: LINE_STYLE.Dashed,     width: 1 },
+    { price: t.midpoint, color: "#555",    label: "MID",   style: LINE_STYLE.Dotted,     width: 1 },
+    { price: t.entry,    color: "#d1d4dc", label: "ENTRY", style: LINE_STYLE.Solid,      width: 2 },
+    { price: t.stop,     color: "#ef5350", label: "SL",    style: LINE_STYLE.Dashed,     width: 1 },
+    { price: t.full_tp,  color: "#26a69a", label: "TP2",   style: LINE_STYLE.Dashed,     width: 1 },
+  ];
+  if (t.tp1 !== null) {
+    lines.push({ price: t.tp1, color: "#ffd600", label: "TP1", style: LINE_STYLE.Dotted, width: 1 });
+  }
+  for (const l of lines) {
+    mainSeries.createPriceLine({
+      price:       l.price,
+      color:       l.color,
+      lineWidth:   l.width,
+      lineStyle:   l.style,
+      axisLabelVisible: true,
+      title:       l.label,
+    });
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Candle markers  (sweep / BOS / entry / TP1 / exit)
+// ─────────────────────────────────────────────────────────────────────────────
+function addMarkers(day) {
+  const t = day.trade;
+  if (!t) return;
+
+  const isLong = t.direction === "LONG";
+  const markers = [];
+
+  const mk = (time, pos, color, shape, text) => {
+    if (time === null || time === undefined) return;
+    markers.push({ time, position: pos, color, shape, text });
+  };
+
+  // Sweep candle
+  mk(t.sweep_time, isLong ? "belowBar" : "aboveBar",
+     "#9c27b0",
+     isLong ? "arrowDown" : "arrowUp",
+     "Sweep");
+
+  // BOS candle
+  mk(t.bos_time, isLong ? "belowBar" : "aboveBar",
+     "#ff9800",
+     isLong ? "arrowUp" : "arrowDown",
+     "BOS");
+
+  // Entry
+  mk(t.entry_time, isLong ? "belowBar" : "aboveBar",
+     "#d1d4dc",
+     isLong ? "arrowUp" : "arrowDown",
+     "Entry");
+
+  // TP1 hit
+  if (t.tp1_time) {
+    mk(t.tp1_time, isLong ? "aboveBar" : "belowBar",
+       "#ffd600", "circle", "TP1");
+  }
+
+  // Exit
+  if (t.exit_time) {
+    const exitColor = t.wl === "W" ? "#26a69a" : t.wl === "PW" ? "#ffa726" : "#ef5350";
+    mk(t.exit_time, isLong ? "aboveBar" : "belowBar",
+       exitColor, "square",
+       t.wl === "W" ? "TP2" : t.wl === "PW" ? "BE" : "SL");
+  }
+
+  // Sort by time (required by Lightweight Charts)
+  markers.sort((a, b) => a.time - b.time);
+  mainSeries.setMarkers(markers);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Session boundary lines — 3am, 8am, 1pm ET
+// All candle times are already in ET-display-as-UTC format (via toETTime),
+// so we build session timestamps the same way: fake-UTC noon on the day date.
+// ─────────────────────────────────────────────────────────────────────────────
+function drawSessionLines(day) {
+  if (!chart || day.candles.length === 0) return;
+
+  // Derive the ET date from the first candle (already in ET-display-as-UTC)
+  const firstCandle = new Date(day.candles[0].time * 1000);
+  const y = firstCandle.getUTCFullYear();
+  const m = firstCandle.getUTCMonth();
+  const d = firstCandle.getUTCDate();
+
+  // Build ET wall-clock timestamps encoded as fake-UTC
+  const t3am = Math.floor(Date.UTC(y, m, d,  3, 0, 0) / 1000);
+  const t8am = Math.floor(Date.UTC(y, m, d,  8, 0, 0) / 1000);
+  const t1pm = Math.floor(Date.UTC(y, m, d, 13, 0, 0) / 1000);
+
+  const lines = [
+    { time: t3am, color: "rgba(120,123,134,0.55)", dash: [4, 4], label: "3am" },
+    { time: t8am, color: "rgba(255,214,0,0.60)",   dash: [5, 3], label: "8am" },
+    { time: t1pm, color: "rgba(239,83,80,0.60)",   dash: [5, 3], label: "1pm" },
+  ];
+
+  const h = overlayCanvas.height;
+  overlayCtx.font = "bold 11px sans-serif";
+  overlayCtx.textBaseline = "top";
+
+  for (const ln of lines) {
+    const x = chart.timeScale().timeToCoordinate(ln.time);
+    if (x === null) continue;
+
+    overlayCtx.strokeStyle = ln.color;
+    overlayCtx.lineWidth = 1;
+    overlayCtx.setLineDash(ln.dash);
+    overlayCtx.beginPath();
+    overlayCtx.moveTo(x, 0);
+    overlayCtx.lineTo(x, h);
+    overlayCtx.stroke();
+    overlayCtx.setLineDash([]);
+
+    // Label at the top
+    overlayCtx.fillStyle = ln.color;
+    overlayCtx.fillText(ln.label, x + 4, 6);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Canvas overlay — Long/Short zone rectangles
+// ─────────────────────────────────────────────────────────────────────────────
+function drawOverlay(day) {
+  const w = overlayCanvas.width;
+  const h = overlayCanvas.height;
+  overlayCtx.clearRect(0, 0, w, h);
+
+  // Session lines always draw, even if no trade
+  drawSessionLines(day);
+
+  if (!day.trade || !mainSeries || !chart) return;
+  const t = day.trade;
+
+  // Time range: from entry_time to exit_time (or last candle if no exit)
+  const startTime = t.entry_time;
+  if (startTime === null) return;
+
+  const endTime = t.exit_time ||
+    (day.candles.length > 0 ? day.candles[day.candles.length - 1].time : null);
+  if (!endTime) return;
+
+  const x0 = chart.timeScale().timeToCoordinate(startTime);
+  const x1 = chart.timeScale().timeToCoordinate(endTime);
+  if (x0 === null || x1 === null) return;
+
+  const entryY  = mainSeries.priceToCoordinate(t.entry);
+  const stopY   = mainSeries.priceToCoordinate(t.stop);
+  const fullTpY = mainSeries.priceToCoordinate(t.full_tp);
+  if (entryY === null || stopY === null || fullTpY === null) return;
+
+  const xLeft  = Math.min(x0, x1);
+  const xRight = Math.max(x0, x1);
+  const rectW  = xRight - xLeft;
+
+  // Risk zone (entry → SL): red
+  const riskTop    = Math.min(entryY, stopY);
+  const riskBottom = Math.max(entryY, stopY);
+  overlayCtx.fillStyle = "rgba(239,83,80,0.12)";
+  overlayCtx.fillRect(xLeft, riskTop, rectW, riskBottom - riskTop);
+  // Risk zone border lines
+  overlayCtx.strokeStyle = "rgba(239,83,80,0.35)";
+  overlayCtx.lineWidth = 1;
+  overlayCtx.strokeRect(xLeft, riskTop, rectW, riskBottom - riskTop);
+
+  // Reward zone (entry → TP2): green
+  const rewardTop    = Math.min(entryY, fullTpY);
+  const rewardBottom = Math.max(entryY, fullTpY);
+  overlayCtx.fillStyle = "rgba(38,166,154,0.10)";
+  overlayCtx.fillRect(xLeft, rewardTop, rectW, rewardBottom - rewardTop);
+  overlayCtx.strokeStyle = "rgba(38,166,154,0.30)";
+  overlayCtx.lineWidth = 1;
+  overlayCtx.strokeRect(xLeft, rewardTop, rectW, rewardBottom - rewardTop);
+
+  // TP1 zone (entry → TP1): yellow tint, if TP1 exists
+  if (t.tp1 !== null) {
+    const tp1Y = mainSeries.priceToCoordinate(t.tp1);
+    if (tp1Y !== null) {
+      const tp1Top    = Math.min(entryY, tp1Y);
+      const tp1Bottom = Math.max(entryY, tp1Y);
+      overlayCtx.fillStyle = "rgba(255,214,0,0.07)";
+      overlayCtx.fillRect(xLeft, tp1Top, rectW, tp1Bottom - tp1Top);
+    }
+  }
+
+  // Vertical line at entry
+  overlayCtx.strokeStyle = "rgba(209,212,220,0.4)";
+  overlayCtx.lineWidth = 1;
+  overlayCtx.setLineDash([4, 3]);
+  overlayCtx.beginPath();
+  overlayCtx.moveTo(x0, 0);
+  overlayCtx.lineTo(x0, h);
+  overlayCtx.stroke();
+  overlayCtx.setLineDash([]);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Legend panel
+// ─────────────────────────────────────────────────────────────────────────────
+function renderLegend(day) {
+  const el = document.getElementById("legend");
+  if (!day.trade) { el.style.display = "none"; return; }
+  const t = day.trade;
+
+  const wlClass = `col-${t.wl}`;
+  const fmt = (v) => v !== null && v !== undefined ? v.toFixed(5) : "—";
+  const rSign = t.r_result >= 0 ? "+" : "";
+  const $sign = t.profit_dollars >= 0 ? "+" : "";
+
+  el.innerHTML = `
+    <div class="leg-title">${t.direction} · ${t.sweep} Sweep</div>
+    <div class="leg-row"><span class="leg-label col-psh">PSH</span>
+      <span class="leg-val col-psh">${fmt(t.psh)}</span></div>
+    <div class="leg-row"><span class="leg-label col-psl">PSL</span>
+      <span class="leg-val col-psl">${fmt(t.psl)}</span></div>
+    <div class="leg-row"><span class="leg-label col-mid">Midpoint</span>
+      <span class="leg-val col-mid">${fmt(t.midpoint)}</span></div>
+    <div class="leg-sep"></div>
+    <div class="leg-row"><span class="leg-label col-entry">Entry</span>
+      <span class="leg-val col-entry">${fmt(t.entry)}</span></div>
+    <div class="leg-row"><span class="leg-label col-sl">Stop</span>
+      <span class="leg-val col-sl">${fmt(t.stop)}</span></div>
+    ${t.tp1 !== null ? `<div class="leg-row"><span class="leg-label col-tp1">TP1</span>
+      <span class="leg-val col-tp1">${fmt(t.tp1)}</span></div>` : ""}
+    <div class="leg-row"><span class="leg-label col-tp2">TP2</span>
+      <span class="leg-val col-tp2">${fmt(t.full_tp)}</span></div>
+    <div class="leg-sep"></div>
+    <div class="leg-row"><span class="leg-label">R:R</span>
+      <span class="leg-val">${t.rr}</span></div>
+    <div class="leg-row"><span class="leg-label">Result</span>
+      <span class="leg-val ${wlClass}">${rSign}${t.r_result}R</span></div>
+    <div class="leg-row"><span class="leg-label">P&L</span>
+      <span class="leg-val ${wlClass}">${$sign}$${Math.abs(t.profit_dollars).toFixed(0)}</span></div>
+    <div class="leg-sep"></div>
+    <div class="leg-row"><span class="leg-label">Outcome</span>
+      <span class="leg-val ${wlClass}">${t.wl}</span></div>
+  `;
+  el.style.display = "block";
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Navigation
+// ─────────────────────────────────────────────────────────────────────────────
+function navigate(dir) {
+  const newIdx = currentIdx + dir;
+  if (newIdx >= 0 && newIdx < allDays.length) showDay(newIdx);
+}
+
+function updateNavButtons() {
+  document.getElementById("btn-prev").disabled = currentIdx <= 0;
+  document.getElementById("btn-next").disabled = currentIdx >= allDays.length - 1;
+  document.getElementById("nav-pos").textContent =
+    allDays.length > 0 ? `${currentIdx + 1} / ${allDays.length}` : "";
+}
+
+// Keyboard navigation
+document.addEventListener("keydown", (e) => {
+  if (e.key === "ArrowLeft")  navigate(-1);
+  if (e.key === "ArrowRight") navigate(1);
+});
+</script>
+</body>
+</html>
